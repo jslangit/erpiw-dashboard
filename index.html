@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Proyeksi Penduduk Kalimantan 2020–2050</title>
+<title>Proyeksi Penduduk Kalimantan 2020–2050 | BPS SP2020</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
@@ -368,6 +368,7 @@ tr:hover td { background: rgba(26,35,56,.5); }
 
   <div class="tab-nav">
     <button class="tab-btn on" onclick="switchTab('chart')">Grafik</button>
+    <button class="tab-btn" onclick="switchTab('scenario')">Perbandingan Skenario</button>
     <button class="tab-btn" onclick="switchTab('annual')">Proyeksi Tahunan</button>
     <button class="tab-btn" onclick="switchTab('5yr')">Proyeksi 5-Tahunan</button>
     <button class="tab-btn" onclick="switchTab('growth')">Laju Pertumbuhan</button>
@@ -402,6 +403,25 @@ tr:hover td { background: rgba(26,35,56,.5); }
         <div class="chart-card">
           <div class="chart-card-title">Laju Pertumbuhan 2020–2050 (%/thn)</div>
           <div class="chart-wrap" style="height:260px"><canvas id="grChart"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB BARU: PERBANDINGAN SKENARIO -->
+    <div class="panel" id="panel-scenario">
+      <div class="chart-grid full">
+        <div class="chart-card">
+          <div class="chart-card-title">
+            <span id="scen-chart-title">Perbandingan Total Populasi Antar Skenario (2020–2050)</span>
+          </div>
+          <div class="type-legend">
+            <div class="tl-item"><div class="tl-dot" style="background:#4a9eff"></div> Tren (Garis Dasar BPS)</div>
+            <div class="tl-item"><div class="tl-dot" style="background:#2ecc71"></div> Optimis (Pertumbuhan Tinggi)</div>
+            <div class="tl-item"><div class="tl-dot" style="background:#f0a030"></div> Moderat (Pertumbuhan Terkendali)</div>
+          </div>
+          <div class="chart-wrap" style="height:420px">
+            <canvas id="scenChart"></canvas>
+          </div>
         </div>
       </div>
     </div>
@@ -661,21 +681,32 @@ function buildAnnual(pops5) {
   return ann;
 }
 
+// Menurunkan efek Skenario ke proyeksi tahunan untuk Kecamatan
+function getAnnSf(sf) {
+  const ann = [];
+  for(let yr = 2020; yr <= 2030; yr++) {
+    if (yr <= 2025) ann.push(geoInterp(sf[0], sf[1], yr - 2020));
+    else ann.push(geoInterp(sf[1], sf[2], yr - 2025));
+  }
+  return ann;
+}
+
 // ═══════════════════════════════════════════════════════════
 // ENGINE PROYEKSI & DRILL-DOWN (KECAMATAN)
 // ═══════════════════════════════════════════════════════════
-function getBaseProj(prov) {
-  const sken = document.getElementById("sel-sken").value;
+function getBaseProj(prov, forceSken = null) {
+  const sken = forceSken || document.getElementById("sel-sken").value;
   const sf   = SF[sken];
   const pd   = PD[prov];
   
   let proj = KD_RAW[prov].map(k => {
     const p5  = extendKab(k, pd.tp, sf); 
-    const ann = buildAnnual(p5);
-    return { name: k.n, p5, ann };
+    // PERBAIKAN 1: Hapus buildAnnual di sini karena p5 belum kena efek skenario
+    return { name: k.n, p5 };
   });
 
-  for (let i = 3; i <= 6; i++) {
+  // PERBAIKAN 2: Ubah index mulai dari 1 (Tahun 2025) agar efek skenario teraplikasi di level kabupaten!
+  for (let i = 1; i <= 6; i++) {
       let targetBPS = pd.tp[i] * sf[i]; 
       let rawTotal = 0;
       proj.forEach(kab => { rawTotal += kab.p5[i]; });
@@ -685,11 +716,20 @@ function getBaseProj(prov) {
           proj.forEach(kab => { kab.p5[i] = kab.p5[i] * ratio; });
       }
   }
+  
+  // PERBAIKAN 3: Hitung 'ann' setelah 'p5' selesai dikalibrasi!
+  proj.forEach(kab => {
+      kab.ann = buildAnnual(kab.p5);
+  });
+
   return proj;
 }
 
-function getProj() {
-  const baseProj = getBaseProj(curProv);
+function getProj(forceSken = null) {
+  const sken = forceSken || document.getElementById("sel-sken").value;
+  const sf = SF[sken];
+  const ann_sf = getAnnSf(sf);
+  const baseProj = getBaseProj(curProv, sken);
   
   if (viewAllKec) {
     let result = [];
@@ -699,13 +739,11 @@ function getProj() {
       if (kecs && kecs.length > 0) {
         const projKec = kecs.map(kec => ({
           name: kec.n, 
-          p5: [...kec.p5], 
-          ann: [...kec.ann], 
+          p5: kec.p5.map((v, i) => v * sf[i]), 
+          ann: kec.ann.map((v, i) => v * ann_sf[i]), 
           isRes: false, 
           parentName: pKab.name
         }));
-        // Hanya menampilkan kecamatan yang ada data excelnya, tanpa campuran data Kabupaten
-        // dan tanpa memunculkan Residual (Lainnya)
         result.push(...projKec);
       }
     });
@@ -718,7 +756,10 @@ function getProj() {
 
     const kecs = uploadedKecData[drillKab] || [];
     const projKec = kecs.map(kec => ({
-      name: kec.n, p5: [...kec.p5], ann: [...kec.ann], isRes: false
+      name: kec.n, 
+      p5: kec.p5.map((v, i) => v * sf[i]), 
+      ann: kec.ann.map((v, i) => v * ann_sf[i]), 
+      isRes: false
     }));
 
     const resP5 = pKab.p5.map((v, i) => Math.max(0, v - projKec.reduce((s, k) => s + k.p5[i], 0)));
@@ -759,7 +800,6 @@ function handleKecUpload(event) {
       let kab = row["Kabupaten/Kota"];
       let kec = row["Kecamatan"];
       
-      // PERBAIKAN: Hentikan jika kosong, dan bersihkan spasi liar (trailing/leading spaces)
       if (!kab || !kec) return;
       kab = kab.toString().trim();
       kec = kec.toString().trim();
@@ -785,6 +825,7 @@ function handleKecUpload(event) {
   };
   reader.readAsArrayBuffer(file);
 }
+
 function toggleViewAllKec() {
   viewAllKec = !viewAllKec;
   drillKab = null; 
@@ -897,21 +938,16 @@ function selectTop5() {
 function buildMetrics() {
   const sken = document.getElementById("sel-sken").value;
   const sf   = SF[sken];
+  const ann_sf = getAnnSf(sf);
   
   let p0=0, annPop2025=0, annPop2030=0, p3=0, p6=0, entityName="";
 
-  if (viewAllKec) {
+  if (viewAllKec || drillKab) {
     const activeProj = getProj(); 
     activeProj.forEach(k => {
       p0+=k.p5[0]; annPop2025+=k.ann[5]; annPop2030+=k.p5[2]; p3+=k.p5[3]; p6+=k.p5[6];
     });
-    entityName = "Kecamatan Terunggah";
-  } else if (drillKab) {
-    const parent = getBaseProj(curProv).find(k => k.name === drillKab);
-    if(parent) {
-      p0 = parent.p5[0]; annPop2025 = parent.ann[5]; annPop2030 = parent.p5[2]; p3 = parent.p5[3]; p6 = parent.p5[6];
-      entityName = drillKab;
-    }
+    entityName = drillKab ? drillKab : "Kecamatan Terunggah";
   } else {
     const pd = PD[curProv];
     p0 = pd.tp[0]; annPop2025 = pd.tp[1]*sf[1]; annPop2030 = pd.tp[2]*sf[2]; p3 = pd.tp[3]*sf[3]; p6 = pd.tp[6]*sf[6];
@@ -929,17 +965,17 @@ function buildMetrics() {
       <div class="m-sub">juta jiwa</div>
     </div>
     <div class="metric">
-      <div class="m-lbl">Pop 2025 (Resmi)</div>
+      <div class="m-lbl">Pop 2025 (Skenario)</div>
       <div class="m-val">${(annPop2025/1000).toFixed(2)}</div>
       <div class="m-sub m-chg ${gr2530>=0?'pos':'neg'}">${gr2530>=0?"+":""}${gr2530.toFixed(2)}%/thn vs 2030</div>
     </div>
     <div class="metric">
-      <div class="m-lbl">Pop 2030 (Resmi)</div>
+      <div class="m-lbl">Pop 2030 (Skenario)</div>
       <div class="m-val">${(annPop2030/1000).toFixed(2)}</div>
       <div class="m-sub">juta jiwa</div>
     </div>
     <div class="metric">
-      <div class="m-lbl">Pop 2035 (Resmi)</div>
+      <div class="m-lbl">Pop 2035 (Skenario)</div>
       <div class="m-val">${(p3/1000).toFixed(2)}</div>
       <div class="m-sub">juta jiwa</div>
     </div>
@@ -959,6 +995,71 @@ function destroyChart(id) { if(charts[id]){charts[id].destroy();delete charts[id
 function getActiveSelection(proj) {
   if (drillKab || viewAllKec) return proj; 
   return proj.filter(k => selKab.has(k.name));
+}
+
+// GRAFIK BARU: PERBANDINGAN SKENARIO
+function buildScenChart() {
+  destroyChart("scen");
+  const allYears = [2020,2021,2022,2023,2024,2025,2026,2027,2028,2029,2030,2035,2040,2045,2050];
+  const scens = ["tren", "optimis", "moderat"];
+  const colors = { tren: "#4a9eff", optimis: "#2ecc71", moderat: "#f0a030" };
+  const labels = { tren: "Tren (Base)", optimis: "Skenario Optimis", moderat: "Skenario Moderat" };
+
+  const datasets = scens.map(s => {
+    const proj = getProj(s);
+    const sel = getActiveSelection(proj);
+    
+    const data = allYears.map(y => {
+      let sum = 0;
+      if (y <= 2030) {
+        const idx = y - 2020;
+        sel.forEach(k => sum += k.ann[idx]);
+      } else {
+        const idx = YEARS5.indexOf(y);
+        sel.forEach(k => sum += k.p5[idx]);
+      }
+      return +(sum/1000).toFixed(2);
+    });
+    
+    return {
+      label: labels[s],
+      data: data.map(v => v * 1000), // Kembalikan ke Ribu Jiwa agar konsisten dengan tooltip
+      borderColor: colors[s],
+      backgroundColor: colors[s] + "22",
+      borderWidth: 2,
+      tension: 0.3,
+      pointRadius: 3,
+      pointHoverRadius: 6
+    };
+  });
+
+  const ctx = document.getElementById("scenChart").getContext("2d");
+  charts.scen = new Chart(ctx, {
+    type: "line",
+    data: { labels: allYears, datasets: datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor:"rgba(13,18,32,.95)", borderColor:"rgba(30,45,69,.8)", borderWidth:1,
+          titleFont:{family:"'IBM Plex Mono'",size:10}, bodyFont:{family:"'IBM Plex Mono'",size:11},
+          callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString('id-ID')} ribu jiwa` }
+        }
+      },
+      scales: {
+        x: { ticks: { color: "#4d6480", font: { family:"'IBM Plex Mono'", size: 10 } }, grid: { color: "rgba(30,45,69,.5)" } },
+        y: { 
+          title: { display: true, text: "Total Populasi (Ribu Jiwa)", color: "#4d6480", font: { family:"'IBM Plex Mono'", size: 10 } }, 
+          ticks: { color: "#4d6480", font: { family:"'IBM Plex Mono'", size: 10 } }, 
+          grid: { color: "rgba(30,45,69,.5)" } 
+        }
+      }
+    }
+  });
+
+  let entity = drillKab ? drillKab : (viewAllKec ? "Kecamatan Terpilih" : curProv);
+  document.getElementById("scen-chart-title").textContent = `Perbandingan Skenario Total Populasi — ${entity} (2020–2050)`;
 }
 
 function buildMainChart(proj) {
@@ -1081,7 +1182,7 @@ function buildBarChart2530(proj) {
           tooltip: {
             callbacks: {
                 title: function(context) {
-                    return sel[context[0].dataIndex].name; // Show full name on hover
+                    return sel[context[0].dataIndex].name; 
                 }
             }
           }
@@ -1249,7 +1350,7 @@ function buildAnnualTable(proj) {
   
   const tots = ANN_YEARS.map((_,i)=>proj.reduce((s,k)=>s+k.ann[i],0));
   const dTot = safeGr(tots[10], tots[0]);
-  let lbl = drillKab || (viewAllKec ? "KECAMATAN TERUNGGAH" : curProv);
+  let lbl = drillKab ? drillKab : (viewAllKec ? "KECAMATAN TERUNGGAH" : curProv);
   const colspan = viewAllKec ? `colspan="2"` : ``;
   
   tbody.innerHTML += `<tr class="sum-tr"><td ${colspan}>TOTAL ${lbl}</td>${tots.map((t,i)=>{
@@ -1282,7 +1383,7 @@ function buildFyrTable(proj) {
   });
   const tots=YEARS5.map((_,i)=>proj.reduce((s,k)=>s+k.p5[i],0));
   const td30=safeGr(tots[6],tots[0]), tr_=safeGr(tots[6],tots[0],1/30);
-  let lbl = drillKab || (viewAllKec ? "KECAMATAN TERUNGGAH" : curProv);
+  let lbl = drillKab ? drillKab : (viewAllKec ? "KECAMATAN TERUNGGAH" : curProv);
   const colspan = viewAllKec ? `colspan="2"` : ``;
 
   tbody.innerHTML += `<tr class="sum-tr"><td ${colspan}>TOTAL ${lbl}</td>${tots.map((t,i)=>`<td class="${i<=3?"bps-official":"ext"}">${t.toFixed(2)}</td>`).join("")}<td class="pos">+${td30.toFixed(1)}%</td><td class="pos">+${tr_.toFixed(2)}%</td></tr>`;
@@ -1618,7 +1719,7 @@ function filterTable(tblId, query) {
 let activeTab = "chart";
 function switchTab(name) {
   activeTab = name;
-  ["chart","annual","5yr","growth","compare","download"].forEach((t,i) => {
+  ["chart","scenario","annual","5yr","growth","compare","download"].forEach((t,i) => {
     const panel = document.getElementById("panel-"+t);
     const btn   = document.querySelectorAll(".tab-btn")[i];
     if (!panel||!btn) return;
@@ -1626,6 +1727,7 @@ function switchTab(name) {
     btn.classList.toggle("on", t===name);
   });
   if (name==="compare") buildCompareCharts();
+  if (name==="scenario") buildScenChart();
   if (name==="download") buildDownloadPanel();
 }
 
@@ -1654,6 +1756,7 @@ function refresh() {
   buildFyrTable(proj);
   buildGrowthTable(proj);
   if (activeTab==="compare") buildCompareCharts();
+  if (activeTab==="scenario") buildScenChart();
   if (activeTab==="download") buildDownloadPanel();
 }
 
