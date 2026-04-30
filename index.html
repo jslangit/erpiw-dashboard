@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Proyeksi Penduduk Kalimantan 2020–2050 | BPS SP2020</title>
+<title>Proyeksi Penduduk Kalimantan 2020-2025</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
@@ -274,9 +274,9 @@ tr:hover td { background: rgba(26,35,56,.5); }
 <body>
 
 <div class="topbar">
-  <div class="logo">BPS</div>
+  <div class="logo">TeamZay</div>
   <div style="flex:1">
-    <div class="topbar-title">Dashboard Proyeksi Penduduk Kab/Kota & Kecamatan</div>
+    <div class="topbar-title">Proyeksi Penduduk Kalimantan 2020-2025</div>
     <div class="topbar-sub">SP2020 · 5 Provinsi · 56 Kabupaten/Kota · Proyeksi 2020–2050</div>
   </div>
   <span class="badge badge-bps">BPS RESMI 2020–2035</span>
@@ -701,11 +701,9 @@ function getBaseProj(prov, forceSken = null) {
   
   let proj = KD_RAW[prov].map(k => {
     const p5  = extendKab(k, pd.tp, sf); 
-    // PERBAIKAN 1: Hapus buildAnnual di sini karena p5 belum kena efek skenario
     return { name: k.n, p5 };
   });
 
-  // PERBAIKAN 2: Ubah index mulai dari 1 (Tahun 2025) agar efek skenario teraplikasi di level kabupaten!
   for (let i = 1; i <= 6; i++) {
       let targetBPS = pd.tp[i] * sf[i]; 
       let rawTotal = 0;
@@ -717,7 +715,6 @@ function getBaseProj(prov, forceSken = null) {
       }
   }
   
-  // PERBAIKAN 3: Hitung 'ann' setelah 'p5' selesai dikalibrasi!
   proj.forEach(kab => {
       kab.ann = buildAnnual(kab.p5);
   });
